@@ -1,0 +1,134 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  labels:
+    k8s-app: filebeat
+  namespace: codis
+data:
+  filebeat.yml: |-
+    filebeat.inputs:
+    - type: log
+      enabled: true
+      paths:
+        - "/usr/share/filebeat/logs/codis-dashboard/*.log.*"
+      fields:
+        log_source: ${ENV:default}-dashboard
+
+    - type: log
+      enabled: true
+      paths:
+        - "/usr/share/filebeat/logs/codis-ha/*.log.*"
+      fields:
+        log_source: ${ENV:default}-ha
+
+    - type: log
+      enabled: true
+      paths:
+        - "/usr/share/filebeat/logs/codis-fe/*.log.*"
+      fields:
+        log_source: ${ENV:default}-fe
+
+    - type: log
+      enabled: true
+      paths:
+        - "/usr/share/filebeat/logs/codis-proxy/*.log.*"
+      fields:
+        log_source: ${ENV:default}-proxy
+
+    - type: log
+      enabled: true
+      paths:
+        - "/usr/share/filebeat/logs/codis-server/*/*.log.*"
+      fields:
+        log_source: ${ENV:default}-server
+
+    setup.template.name: "index-%{[beat.version]}"
+    setup.template.pattern: "index-%{[beat.version]}"
+
+    output.elasticsearch:
+      hosts: ['${ELASTICSEARCH_URI}']
+      #username: ${ELASTICSEARCH_USERNAME}
+      #password: ${ELASTICSEARCH_PASSWORD}
+      index: "codis-%{[fields.log_source]}-%{+yyyy.MM.dd}"
+      required_acks: 1
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: filebeat
+  namespace: codis
+  labels:
+    app: filebeat
+spec:
+  selector:
+    matchLabels:
+      app: filebeat
+  template:
+    metadata:
+      labels:
+        app: filebeat
+    spec:
+      terminationGracePeriodSeconds: 60
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+      - name: filebeat
+        image: elastic/filebeat:7.3.2
+        args: ["-c", "/etc/filebeat.yml", "-e"]
+        securityContext:
+          runAsUser: 0
+        env:
+          - name: ELASTICSEARCH_URI
+            valueFrom:
+              configMapKeyRef:
+                name: codis-config
+                key: ELASTICSEARCH_URI
+          - name: ELASTICSEARCH_USERNAME
+            valueFrom:
+              configMapKeyRef:
+                name: codis-config
+                key: ELASTICSEARCH_USERNAME
+          - name: ELASTICSEARCH_PASSWORD
+            valueFrom:
+              configMapKeyRef:
+                name: codis-config
+                key: ELASTICSEARCH_PASSWORD
+          - name: ENV
+            valueFrom:
+              configMapKeyRef:
+                name: codis-config
+                key: ENV
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 101Mi
+        volumeMounts:
+          - name: config
+            mountPath: /etc/filebeat.yml
+            readOnly: true
+            subPath: filebeat.yml
+          - name: data
+            mountPath: /usr/share/filebeat/data
+          - name: codis-logs
+            mountPath: /usr/share/filebeat/logs
+            readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            defaultMode: 0600
+            name: filebeat-config
+        - name: data
+          hostPath:
+            path: /data/service/filebeat-data
+            type: DirectoryOrCreate
+        - name: timezone
+          hostPath:
+            path: /etc/localtime
+            type: File
+        - name: codis-logs
+          hostPath:
+            path: /data/logs

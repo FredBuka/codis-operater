@@ -1,0 +1,220 @@
+apiVersion: k8s.infra.cn/v1
+kind: CodisCluster
+metadata:
+  name: example-1
+spec:
+  ### common configuration
+  logPath: /data/logs
+  zkAddr: "172.17.2.70:2181"
+  productName: codis
+  codisImage: oarfah/codis:3.2
+
+  ### codis-fe
+  feSpec:
+    serviceType: NodePort
+    # serviceType: LoadBalancer # Only supports Alibaba Cloud load balancing, slbInstanceId Only use Alibaba Cloud's load-balance instanceid
+    # slbInstanceId: xxxxxxx  # if serviceType is LoadBalancer
+    servicePort: 8080
+    replicas: 1
+    # Simple scheduling strategies use nodeSelector, complex ones can use affinity
+    # nodeSelector:
+    #   role: codis-ctrl
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                    - codis-data
+    codisFeResources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: "0.5"
+        memory: 0.5Gi
+
+  ### codis-dashboard
+  dashboardSpec:
+    serviceType: NodePort
+    # serviceType: LoadBalancer # Only supports Alibaba Cloud load balancing, slbInstanceId Only use Alibaba Cloud's load-balance instanceid
+    # slbInstanceId: xxxxxxx  # if serviceType is LoadBalancer
+    servicePort: 18080
+    replicas: 1
+    # Simple scheduling strategies use nodeSelector, complex ones can use affinity
+    # nodeSelector:
+    #   role: codis-ctrl
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                    - codis-ctrl
+    codisDashboardResources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: "0.5"
+        memory: 0.5Gi
+
+  ### codis-ha
+  haSpec:
+    replicas: 1
+    # Simple scheduling strategies use nodeSelector, complex ones can use affinity
+    # nodeSelector:
+    #   role: codis-ctrl
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                    - codis-ctrl
+    codisHaResources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: "0.5"
+        memory: 0.5Gi
+
+  ### codis-proxy
+  proxySpec:
+    serviceType: NodePort
+    # serviceType: LoadBalancer # Only supports Alibaba Cloud load balancing, slbInstanceId Only use Alibaba Cloud's load-balance instanceid
+    # slbInstanceId: xxxxxxxx # Must not be empty if serviceType is LoadBalancer
+    servicePort: 19000
+    replicas: 1
+    auth: "123456"
+    # Simple scheduling strategies use nodeSelector, complex ones can use affinity
+    # nodeSelector:
+    #   role: codis-data
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                    - codis-data
+    codisProxyResources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: "0.5"
+        memory: 0.5Gi
+
+  ### codis-server
+  redisSpec:
+    replicas: 2
+    codisServerNumsPerGroup: 2
+    scheduler: default-scheduler
+    logPath: /data/logs
+
+    # Simple scheduling strategies use nodeSelector, complex ones can use affinity
+    # nodeSelector:
+    #   role: codis-data
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                    - codis-data
+    codisServerResources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: "0.5"
+        memory: 0.5Gi
+
+    # redis-exporter image, scrape redis metrics for prometheus
+    exporterImage: oliver006/redis_exporter:latest
+    codisServerExporterResources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: "0.5"
+        memory: 0.5Gi
+
+    # redis rdb backup strategy
+    backupImage: oarfah/codis-backup:v0.1
+    backupCronJob:
+      concurrencyPolicy: Forbid
+      schedule: "0 3 * * *"
+      startingDeadlineSeconds: 7200
+      successfulJobsHistoryLimit: 1
+
+    # storageclass name
+    storageClassName: codis-server-storage-class
+    # pvc capacity configuration
+    storageResources:
+      requests:
+        storage: 10Gi
+
+    # redis configuration, If there are no special customization requirements, you can use the default value
+    redisConf:
+      redis.conf: |-
+        bind 127.0.0.1
+        protected-mode yes
+        port 6379
+        tcp-backlog 511
+        timeout 0
+        tcp-keepalive 300
+        daemonize yes
+        supervised no
+        pidfile /tmp/redis_6379.pid
+        loglevel notice
+        logfile "/tmp/redis_6379.log"
+        databases 16
+        stop-writes-on-bgsave-error yes
+        rdbcompression yes
+        rdbchecksum yes
+        dir ./
+        slave-serve-stale-data yes
+        slave-read-only yes
+        repl-diskless-sync no
+        repl-diskless-sync-delay 5
+        repl-disable-tcp-nodelay no
+        slave-priority 100
+        maxmemory 32G
+        appendonly no
+        appendfilename "appendonly.aof"
+        appendfsync everysec
+        no-appendfsync-on-rewrite no
+        auto-aof-rewrite-percentage 100
+        auto-aof-rewrite-min-size 64mb
+        aof-load-truncated yes
+        lua-time-limit 5000
+        slowlog-log-slower-than 10000
+        slowlog-max-len 128
+        latency-monitor-threshold 0
+        notify-keyspace-events ""
+        hash-max-ziplist-entries 512
+        hash-max-ziplist-value 64
+        list-max-ziplist-size -2
+        list-compress-depth 0
+        set-max-intset-entries 512
+        zset-max-ziplist-entries 128
+        zset-max-ziplist-value 64
+        hll-sparse-max-bytes 3000
+        activerehashing yes
+        client-output-buffer-limit normal 0 0 0
+        client-output-buffer-limit slave 256mb 64mb 60
+        client-output-buffer-limit pubsub 32mb 8mb 60
+        hz 10
+        aof-rewrite-incremental-fsync yes

@@ -1,0 +1,7 @@
+domain: infra.cn
+repo: github/oarfah/codis-operater
+resources:
+- group: infra
+  kind: CodisCluster
+  version: v1
+version: "2"

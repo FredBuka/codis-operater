@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  labels:
+    app: cloud-controller-manager
+    tier: control-plane
+  name: cloud-controller-manager
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: cloud-controller-manager
+      tier: control-plane
+  template:
+    metadata:
+      labels:
+        app: cloud-controller-manager
+        tier: control-plane
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      serviceAccountName: cloud-controller-manager
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+          key: node-role.kubernetes.io/master
+        - effect: NoSchedule
+          operator: Exists
+          key: node.cloudprovider.kubernetes.io/uninitialized
+      nodeSelector:
+        node-role.kubernetes.io/master: "true"
+      containers:
+        - command:
+            -  /cloud-controller-manager
+            - --kubeconfig=/etc/kubernetes/cloud-controller-manager.conf
+            - --address=127.0.0.1
+            - --allow-untagged-cloud=true
+            - --leader-elect=true
+            - --cloud-config=/etc/kubernetes/cloud-config.json
+            - --cloud-provider=alicloud
+            - --cluster-name=c1_test
+            # network plugin 或者cloudNetwork 可考虑打开
+            - --allocate-node-cidrs=false
+            - --cluster-cidr=10.254.0.0/16
+            # 非cloudNetwork必须禁止,否则会配置阿里云路由表
+            - --configure-cloud-routes=false
+            - --use-service-account-credentials=true
+            - --route-reconciliation-period=30s
+            - --v=5
+          #image: registry.cn-hangzhou.aliyuncs.com/acs/cloud-controller-manager-amd64:v1.9.3.112-g93c7140-aliyun
+          image: registry.cn-hangzhou.aliyuncs.com/acs/cloud-controller-manager-amd64:v1.9.3.164-g2105d2e-aliyun
+          env:
+            - name: ACCESS_KEY_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: cloud-config-sk
+                  key: special.keyid
+            - name: ACCESS_KEY_SECRET
+              valueFrom:
+                configMapKeyRef:
+                  name: cloud-config-sk
+                  key: special.keysecret
+          livenessProbe:
+            failureThreshold: 8
+            httpGet:
+              host: 127.0.0.1
+              path: /healthz
+              port: 10252
+              scheme: HTTP
+            initialDelaySeconds: 15
+            timeoutSeconds: 15
+          name: cloud-controller-manager
+          resources:
+            requests:
+              cpu: 200m
+          volumeMounts:
+            - mountPath: /etc/kubernetes/
+              name: k8s
+              readOnly: true
+            - mountPath: /etc/ssl/certs
+              name: certs
+            - mountPath: /etc/pki
+              name: pki
+      hostNetwork: true
+      volumes:
+        - configMap:
+            name: cloud-controller-manager
+          name: k8s
+        - hostPath:
+            path: /etc/ssl/certs
+          name: certs
+        - hostPath:
+            path: /etc/pki
+          name: pki
